@@ -8,14 +8,14 @@
 ### Stage 1: 事前学習（Clotho-Moment）
 
 ```bash
-cd /data/kokuryumaru/Datascience2026_cgdetr/src
+cd ../Datascience2026_cgdetr/src
 python train.py --config ../config_pretraining.yml
 ```
 
 ### Stage 2: ファインチューニング（CASTELLA）
 
 ```bash
-cd /data/kokuryumaru/Datascience2026_cgdetr/src
+cd ../Datascience2026_cgdetr/src
 python train.py --config ../config.yml --resume ../results_pretraining/best.ckpt
 ```
 
