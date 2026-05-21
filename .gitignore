@@ -1,0 +1,11 @@
+# Checkpoints and large model files
+*.ckpt
+*.pt
+*.pth
+
+# Python cache
+__pycache__/
+*.pyc
+
+# NFS temp files
+.nfs*
