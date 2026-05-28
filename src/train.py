@@ -45,7 +45,14 @@ def setup_model(opt):
         criterion.to(opt.device)
     param_dicts = [{"params": [p for n, p in model.named_parameters() if p.requires_grad]}]
     optimizer = torch.optim.AdamW(param_dicts, lr=opt.lr, weight_decay=opt.wd)
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, opt.lr_drop)
+    scheduler_type = getattr(opt, 'lr_scheduler', 'step')
+    if scheduler_type == 'cosine':
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=opt.n_epoch, eta_min=getattr(opt, 'lr_min', 0.0))
+        logger.info(f"Using CosineAnnealingLR (T_max={opt.n_epoch}, eta_min={getattr(opt, 'lr_min', 0.0)})")
+    else:
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, opt.lr_drop)
+        logger.info(f"Using StepLR (step_size={opt.lr_drop})")
     return model, criterion, optimizer, lr_scheduler
 
 
