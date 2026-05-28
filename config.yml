@@ -55,6 +55,18 @@ lw_wattn: 1
 lw_ms_align: 1
 lw_distill: 1
 
+# Sim-DETR QGR (Query Group Restriction) — penalize self-attn between
+# decoder queries that have close predicted centers (set qgr_enabled to false
+# to disable, exactly reproducing the original CG-DETR behavior).
+qgr_enabled: true
+qgr_beta: 0.1
+qgr_sigma: 0.1
+
+# Sim-DETR GLB (Global-Local Bridging) loss — InfoNCE between matched
+# query and frames inside the GT moment. Set lw_glb to 0 to disable.
+lw_glb: 0.5
+glb_tau: 0.07
+
 # Checkpoint & logging
 ckpt_filename: best.ckpt
 train_log_filename: train.log

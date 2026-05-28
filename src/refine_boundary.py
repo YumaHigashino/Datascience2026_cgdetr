@@ -21,11 +21,46 @@ import argparse
 import numpy as np
 
 
-def refine_one(top1, saliency, search_radius=5, alpha=0.1, beta=0.5):
+def savgol_smooth(x, window=5, polyorder=2):
+    """E.M.Ground-style Savitzky-Golay smoothing of the saliency curve.
+
+    Pure numpy implementation (no scipy dependency). Falls back to identity
+    if the window is larger than the signal length.
+    """
+    x = np.asarray(x, dtype=np.float32)
+    n = len(x)
+    if window < 3 or window > n:
+        return x
+    if window % 2 == 0:
+        window += 1  # must be odd
+    if polyorder >= window:
+        polyorder = window - 1
+    half = window // 2
+    # build the Savitzky-Golay coefficient matrix via least squares
+    # for each offset i in [-half, half], we have row [1, i, i^2, ..., i^polyorder]
+    idx = np.arange(-half, half + 1)
+    A = np.vstack([idx ** p for p in range(polyorder + 1)]).T  # (window, polyorder+1)
+    # coefficients to recover the smoothed value at the center:
+    # take the first column of (A^T A)^-1 A^T (corresponds to the constant term)
+    coeffs = np.linalg.pinv(A)[0]  # (window,)
+    # apply via correlation, handling boundaries by reflection
+    x_padded = np.pad(x, half, mode='edge')
+    out = np.zeros_like(x)
+    for i in range(n):
+        out[i] = np.dot(coeffs, x_padded[i:i + window])
+    return out
+
+
+def refine_one(top1, saliency, search_radius=5, alpha=0.1, beta=0.5,
+               smooth_window=0, smooth_polyorder=2):
     """Find a locally optimal [s', e'] within +-search_radius of original."""
     s, e, score = float(top1[0]), float(top1[1]), float(top1[2])
     T = len(saliency)
     saliency = np.asarray(saliency, dtype=np.float32)
+
+    # E.M.Ground-style smoothing (optional)
+    if smooth_window > 0:
+        saliency = savgol_smooth(saliency, window=smooth_window, polyorder=smooth_polyorder)
 
     s_int = int(round(s))
     e_int = int(round(e))
@@ -75,6 +110,9 @@ def main():
                         help='length_penalty weight (larger = preserve length)')
     parser.add_argument('--radius', type=int, default=5,
                         help='search +- N seconds around the original boundary')
+    parser.add_argument('--smooth_window', type=int, default=0,
+                        help='Savitzky-Golay smoothing window (odd, >=3). 0 = disabled.')
+    parser.add_argument('--smooth_polyorder', type=int, default=2)
     args = parser.parse_args()
 
     refined = []
@@ -102,7 +140,9 @@ def main():
             new_top1 = refine_one(top1, saliency,
                                   search_radius=args.radius,
                                   alpha=args.alpha,
-                                  beta=args.beta)
+                                  beta=args.beta,
+                                  smooth_window=args.smooth_window,
+                                  smooth_polyorder=args.smooth_polyorder)
 
             if (new_top1[0] != top1[0]) or (new_top1[1] != top1[1]):
                 n_changed += 1
