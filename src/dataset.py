@@ -198,7 +198,7 @@ class CGDETR_StartEndDataset(Dataset):
                                 self.get_saliency_labels_all(meta["relevant_clip_ids"], meta["saliency_scores"], ctx_l)
                     elif self.dset_name in ['charades', 'tacos', 'activitynet', 'clotho-moment', 'unav100-subset', 'tut2017', 'castella']: ## charades, tacos, nlq
                         model_inputs["saliency_pos_labels"], model_inputs["saliency_neg_labels"], model_inputs["saliency_all_labels"] = \
-                            self.get_saliency_labels_sub_as_query(meta["relevant_windows"][0], meta["duration"], ctx_l)  # only one gt
+                            self.get_saliency_labels_sub_as_query(meta["relevant_windows"], meta["duration"], ctx_l)  # B-team patch: use ALL relevant_windows
                     else:
                         raise NotImplementedError()
                 
@@ -214,30 +214,49 @@ class CGDETR_StartEndDataset(Dataset):
             [self.vocab.stoi.get(w.lower(), 400000) for w in query.split()])
         return self.embedding(word_inds)
 
-    def get_saliency_labels_sub_as_query(self, gt_window, duration, ctx_l, max_n=2):
+    def get_saliency_labels_sub_as_query(self, gt_window_or_windows, duration, ctx_l, max_n=2):
+        """
+        B-team patch (2026-05-28): supports both a single window [s, e] and a
+        list of windows [[s, e], ...]. For CASTELLA, the audio has up to 5
+        relevant_windows per query; the original implementation used only the
+        first one and discarded the rest. This version unions all windows.
+        """
         clip_len = duration / ctx_l
-        gt_st = int(gt_window[0] / clip_len)
-        gt_ed = max(0, min(int(gt_window[1] / clip_len), ctx_l) - 1)
-        if gt_st > gt_ed:
-            gt_st = gt_ed
 
-        if gt_st != gt_ed:
-            pos_clip_indices = random.sample(range(gt_st, gt_ed + 1), k=max_n)
+        # Normalize input to a list of windows (backward compatible).
+        if not isinstance(gt_window_or_windows[0], (list, tuple)):
+            windows = [gt_window_or_windows]
         else:
-            if self.dset_name == 'nlq':
-                pos_clip_indices = [gt_st] * 2
-            else:
-                pos_clip_indices = [gt_st, gt_st]
+            windows = gt_window_or_windows
 
-        neg_pool = list(range(0, gt_st)) + list(range(gt_ed+1, ctx_l))
+        # Build score_array and positive pool by union over all windows.
+        score_array = np.zeros(ctx_l)
+        pos_pool = set()
+        for w in windows:
+            gt_st = int(w[0] / clip_len)
+            gt_ed = max(0, min(int(w[1] / clip_len), ctx_l) - 1)
+            if gt_st > gt_ed:
+                gt_st = gt_ed
+            score_array[gt_st:gt_ed + 1] = 1
+            pos_pool.update(range(gt_st, gt_ed + 1))
+
+        pos_pool = sorted(pos_pool)
+
+        if len(pos_pool) >= max_n:
+            pos_clip_indices = random.sample(pos_pool, k=max_n)
+        elif len(pos_pool) > 0:
+            if self.dset_name == 'nlq':
+                pos_clip_indices = [pos_pool[0]] * max_n
+            else:
+                pos_clip_indices = (pos_pool * max_n)[:max_n]
+        else:
+            pos_clip_indices = [0, 0]
+
+        neg_pool = list(set(range(ctx_l)) - set(pos_pool))
         try:
             neg_clip_indices = random.sample(neg_pool, k=max_n)
         except:
             neg_clip_indices = pos_clip_indices
-
-        # For charades_sta
-        score_array = np.zeros(ctx_l)
-        score_array[gt_st:gt_ed + 1] = 1
 
         return pos_clip_indices, neg_clip_indices, score_array
         
