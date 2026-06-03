@@ -67,7 +67,8 @@ class CGDETR_StartEndDataset(Dataset):
                  q_feat_dir, q_feat_type="last_hidden_state", v_feat_types="clip",
                  a_feat_types="pann", max_q_l=32, max_v_l=75, max_a_l=75,
                  ctx_mode="video", normalize_v=True, normalize_t=True, clip_len=2, max_windows=5, 
-                 span_loss_type="l1", dset_domain=None, load_labels=True):
+                 span_loss_type="l1", dset_domain=None, load_labels=True,
+                 short_oversample=0, short_thresh=3.0):
         self.dset_name = dset_name
         self.data_path = data_path
         self.domain = domain
@@ -101,6 +102,8 @@ class CGDETR_StartEndDataset(Dataset):
         self.max_windows = max_windows  # maximum number of windows to use as labels
         self.span_loss_type = span_loss_type
         self.load_labels = load_labels
+        self.short_oversample = short_oversample
+        self.short_thresh = short_thresh
 
         # checks
         assert q_feat_type in self.Q_FEAT_TYPES
@@ -114,6 +117,20 @@ class CGDETR_StartEndDataset(Dataset):
                 if d['domain'] == self.domain:
                     new_data.append(d)
             self.data = new_data
+
+        # 短モーメント・オーバーサンプリング: 事前学習(Clotho-Moment)の短モーメントが0.8%
+        # しか無く検出能力が乏しいため、短い relevant_window(<=thresh秒)を含むサンプルを
+        # 複製して露出を増やす。0 で無効。train でのみ有効化する(eval は 0 を渡す)。
+        if self.short_oversample > 0:
+            extra = []
+            for d in self.data:
+                ws = d.get('relevant_windows', [])
+                if ws and min((w[1] - w[0]) for w in ws) <= self.short_thresh:
+                    extra.extend([d] * self.short_oversample)
+            n_before = len(self.data)
+            self.data = self.data + extra
+            print(f"[short_oversample={self.short_oversample}] {n_before} -> "
+                  f"{len(self.data)} samples (+{len(extra)} with short<= {self.short_thresh}s)")
 
         self.use_glove = 'glove' in q_feat_dir
         if self.use_glove:

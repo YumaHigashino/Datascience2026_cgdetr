@@ -197,10 +197,13 @@ def main(opt, resume=None):
         max_windows=opt.max_windows,
         span_loss_type=opt.span_loss_type,
         load_labels=True,
+        short_oversample=getattr(opt, 'short_oversample', 0),
+        short_thresh=getattr(opt, 'short_thresh', 3.0),
     )
     train_dataset = CGDETR_StartEndDataset(**dataset_config)
     eval_config = copy.deepcopy(dataset_config)
     eval_config.data_path = opt.val_path
+    eval_config.short_oversample = 0  # val はオーバーサンプリングしない
     val_dataset = CGDETR_StartEndDataset(**eval_config)
 
     model, criterion, optimizer, lr_scheduler = setup_model(opt)
