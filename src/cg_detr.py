@@ -483,8 +483,19 @@ class SetCriterion(nn.Module):
             loss_giou = loss_span.new_zeros([1])
 
         losses = {}
-        losses['loss_span'] = loss_span.mean()
-        losses['loss_giou'] = loss_giou.mean()
+        gamma = getattr(self.args, 'len_reweight_gamma', 0.0)
+        if self.span_loss_type == "l1" and gamma > 0 and tgt_spans.numel() > 0:
+            # 短モーメント重点: 事前学習データ(Clotho-Moment)が長尺95.5%に偏り短モーメント
+            # の局在を学べていない。GT正規化幅(=長さ)の逆数^gamma で短い側の勾配を増幅する。
+            # rw は平均1に正規化して全体スケール(span_loss_coef)を保つ。gamma=0 で既存と一致。
+            tgt_w = tgt_spans[:, 1].detach().clamp(min=1e-3)
+            rw = tgt_w.pow(-gamma)
+            rw = rw / rw.mean().clamp(min=1e-6)
+            losses['loss_span'] = (loss_span.mean(dim=1) * rw).mean()
+            losses['loss_giou'] = (loss_giou * rw).mean()
+        else:
+            losses['loss_span'] = loss_span.mean()
+            losses['loss_giou'] = loss_giou.mean()
         return losses
 
     def loss_labels(self, outputs, targets, indices, log=True):
