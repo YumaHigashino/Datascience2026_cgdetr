@@ -112,7 +112,7 @@ def main():
 
     # ---- (B)(C) 長さ別 R1 と 丸め除去の上限 ----
     buckets = ['<=3s', '3-10s', '>10s', 'all']
-    agg = {b: {'iou': [], 'dq': []} for b in buckets}
+    agg = {b: {'iou': [], 'dq': [], 'cerr': [], 'lr': [], 'iou0': []} for b in buckets}
     n_missing = 0
     for d in pred_rows:
         qid = str(d['qid'])
@@ -126,9 +126,16 @@ def main():
         bi, bg = best_iou(pred, gts)
         dq = dequant_upper_iou(pred, gts, r=args.dequant_radius, step=args.step)
         b = bucket_of(bg[1] - bg[0])
+        pc = (pred[0] + pred[1]) / 2.0
+        gc = (bg[0] + bg[1]) / 2.0
+        plen = pred[1] - pred[0]
+        glen = bg[1] - bg[0]
         for key in (b, 'all'):
             agg[key]['iou'].append(bi)
             agg[key]['dq'].append(dq)
+            agg[key]['cerr'].append(pc - gc)
+            agg[key]['lr'].append(plen / glen if glen > 1e-9 else 0.0)
+            agg[key]['iou0'].append(1.0 if bi < 1e-9 else 0.0)
 
     print()
     print("=" * 68)
@@ -151,6 +158,25 @@ def main():
     print()
     print(f"注: 『上限』は各 pred 端を ±{args.dequant_radius}s で最適化した場合の到達可能 R1@0.7。")
     print("    真の連続値がこの最適点にある保証はないので楽観的上限。実効果は round 除去の再推論で測る。")
+
+    # ---- (D) 局在診断: 中心を外しているか / 長く出しすぎか ----
+    print()
+    print("=" * 68)
+    print("(D) 局在診断 — 中心を外しているか / 長く出しすぎか")
+    print("-" * 68)
+    hdr2 = f"{'bucket':>7} | {'n':>5} | {'|中心誤差|中央':>11} | {'中心誤差中央(符号)':>14} | {'長さ比中央':>9} | {'IoU=0%':>7}"
+    print(hdr2)
+    print("-" * 70)
+    for b in buckets:
+        ce = np.array(agg[b]['cerr'])
+        lr = np.array(agg[b]['lr'])
+        i0 = np.array(agg[b]['iou0'])
+        if len(ce) == 0:
+            continue
+        print(f"{b:>7} | {len(ce):>5} | {np.median(np.abs(ce)):>11.2f} | {np.median(ce):>14.2f} | {np.median(lr):>9.2f} | {np.mean(i0) * 100:>6.1f}%")
+    print()
+    print("読み: |中心誤差|が大 → 局在自体に失敗(中心を外す)。長さ比>>1 → 長く出しすぎ。")
+    print("      長さ比≈1かつ中心誤差小なのにR1@0.7低い → 1秒前後の微ズレ(後処理で救える)。")
 
 
 if __name__ == '__main__':
