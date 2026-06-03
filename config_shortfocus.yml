@@ -1,7 +1,7 @@
 # Stage 2 (short-moment focus): Fine-tuning CG-DETR on CASTELLA
 #   現行 config.yml をそのまま継承し、span/giou 損失を GT 長さで逆重み付けする
-#   len_reweight_gamma だけを追加した版。ベースラインとの差分が純粋に「短モーメント
-#   重点」の効果になるよう、qgr/glb 等は一切変更していない。
+#   25.39 構成(B班修正のみ=Sim-DETR無効)に len_reweight_gamma を足した版。
+#   ベースラインとの差分が純粋に「短モーメント重点」の効果になるようにする。
 # Usage:
 #   cd ~/Datascience2026_cgdetr/src
 #   python train.py --config ../config_shortfocus.yml --resume $HOME/Datascience2026_cgdetr/results_pretraining/best.ckpt
@@ -63,13 +63,13 @@ lw_distill: 1
 # 0 で既存と完全一致。まず 0.5 で検証。
 len_reweight_gamma: 0.5
 
-# Sim-DETR QGR (Query Group Restriction)
-qgr_enabled: true
+# Sim-DETR QGR — 25.39 構成(B班修正のみ)に合わせ無効化(メモリ: Sim-DETR は -1.93pt 逆効果)
+qgr_enabled: false
 qgr_beta: 0.1
 qgr_sigma: 0.1
 
-# Sim-DETR GLB (Global-Local Bridging) loss
-lw_glb: 0.5
+# Sim-DETR GLB — 同上、無効化
+lw_glb: 0
 glb_tau: 0.07
 
 # Checkpoint & logging
