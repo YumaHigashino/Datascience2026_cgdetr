@@ -1,0 +1,114 @@
+# Stage 2 (short-moment SYNTHESIS): Fine-tuning CG-DETR on CASTELLA + 合成データ
+#   前回の複製(short_oversample, 新情報ゼロ → -1.63)に代えて、特徴レベルの cut-paste で
+#   新規サンプルを「合成」する版 (synth_short.py)。全帯を増やしつつ短(<=3s)を相対的に
+#   多く増やし、前回のような短バイアスを避ける(スケーリング則の趣旨)。
+#   複製(short_oversample)は 0 に。25.39 構成(Sim-DETR無効/len_reweight 0)は踏襲。
+# 事前準備 (cwd=src):
+#   mkdir -p ../aug/clap ../aug/clap_text
+#   for f in ../features/castella/clap/*.npz;      do ln -sf "$(readlink -f "$f")" "../aug/clap/$(basename "$f")"; done
+#   for f in ../features/castella/clap_text/*.npz; do ln -sf "$(readlink -f "$f")" "../aug/clap_text/$(basename "$f")"; done
+#   ../.venv/bin/python synth_short.py --train_gt ../data/castella_train_release.jsonl \
+#       --a_feat_dir ../features/castella/clap --t_feat_dir ../features/castella/clap_text \
+#       --out_jsonl ../aug/train_synth.jsonl --out_a_dir ../aug/clap --out_t_dir ../aug/clap_text \
+#       --mult_short 2 --mult_mid 1 --mult_long 1 --max_seg 30 --margin 2 --seed 0
+# Usage:
+#   PYTHONIOENCODING=utf-8 ../.venv/bin/python train.py --config ../config_synth.yml \
+#       --resume $HOME/Datascience2026_cgdetr/results_pretraining/best.ckpt
+
+seed: 2023
+device: 'cuda'
+num_workers: 4
+model_name: cg_detr
+
+lr: 0.00005
+lr_drop: 100
+wd: 0.0001
+n_epoch: 100
+bsz: 32
+eval_bsz: 100
+grad_clip: 0.1
+max_windows: 10
+clip_length: 1
+eval_epoch_interval: 1
+
+# Transformer architecture
+position_embedding: "sine"
+enc_layers: 3
+dec_layers: 3
+t2v_layers: 2
+sent_layers: 1
+moment_layers: 1
+dummy_layers: 2
+dim_feedforward: 1024
+hidden_dim: 256
+input_dropout: 0.3
+dropout: 0.1
+nheads: 8
+num_queries: 10
+n_input_proj: 2
+
+# CG-DETR specific
+num_dummies: 45
+total_prompts: 10
+num_prompts: 2
+
+# Loss weights
+saliency_margin: 0.2
+span_loss_type: "l1"
+set_cost_span: 10
+set_cost_giou: 1
+set_cost_class: 4
+span_loss_coef: 10
+giou_loss_coef: 1
+label_loss_coef: 4
+eos_coef: 0.1
+lw_saliency: 1
+lw_wattn: 1
+lw_ms_align: 1
+lw_distill: 1
+
+# 損失の長さ逆重み付けは無効(gamma=0.5 は逆効果だった)
+len_reweight_gamma: 0.0
+
+# === 複製オーバーサンプリングは無効(合成で増やすため) ===
+short_oversample: 0
+short_thresh: 3.0
+
+# Sim-DETR QGR — 25.39 構成に合わせ無効
+qgr_enabled: false
+qgr_beta: 0.1
+qgr_sigma: 0.1
+
+# Sim-DETR GLB — 同上、無効
+lw_glb: 0
+glb_tau: 0.07
+
+# Checkpoint & logging
+ckpt_filename: best.ckpt
+train_log_filename: train.log
+eval_log_filename: val.log
+eval_split_name: val
+aux_loss: True
+
+# EMA
+model_ema: True
+ema_decay: 0.999
+results_dir: results_synth
+
+# Dataset: CASTELLA + 合成 (train のみ差し替え。val/test は元 jsonl)
+dset_name: castella
+train_path: aug/train_synth.jsonl
+val_path: data/castella_val_release.jsonl
+test_path: data/castella_test_release.jsonl
+max_q_l: 32
+max_a_l: 300
+
+# Features: 合成dir (元npzへのsymlink + 合成npz を含む)
+ctx_mode: audio_tef
+a_feat_dir: aug/clap
+t_feat_dir: aug/clap_text
+a_feat_type: clap
+t_feat_type: clap
+v_feat_dim: 2
+a_feat_dim: 768
+t_feat_dim: 768

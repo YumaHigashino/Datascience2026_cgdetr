@@ -18,10 +18,11 @@ Usage (サーバー, cwd=src):
         --a_feat_dir ../features/castella/clap \
         --t_feat_dir ../features/castella/clap_text \
         --out_jsonl ../data/castella_train_synth.jsonl \
-        --out_a_dir ../features/castella/clap_aug \
-        --out_t_dir ../features/castella/clap_text_aug \
-        --thresh 3.0 --mult 5 --margin 2 --seed 0
+        --out_a_dir ../aug/clap \
+        --out_t_dir ../aug/clap_text \
+        --mult_short 2 --mult_mid 1 --mult_long 1 --margin 2 --seed 0
 
+全帯を合成で増やし、短(<=band1)を相対的に多く(mult_short>mult_mid=mult_long)。
 スモーク確認(少数だけ):  上記に --limit_sources 20 を足す
 """
 
@@ -78,8 +79,12 @@ def main():
     p.add_argument("--out_jsonl", required=True)
     p.add_argument("--out_a_dir", required=True)
     p.add_argument("--out_t_dir", required=True)
-    p.add_argument("--thresh", type=float, default=3.0, help="短区間とみなす秒数")
-    p.add_argument("--mult", type=int, default=5, help="1ソースあたり何個の背景に貼るか")
+    p.add_argument("--band1", type=float, default=3.0, help="短/中の境界秒")
+    p.add_argument("--band2", type=float, default=10.0, help="中/長の境界秒")
+    p.add_argument("--mult_short", type=int, default=2, help="<=band1 ソースの合成数/ソース(短を相対的に多く)")
+    p.add_argument("--mult_mid", type=int, default=1, help="band1-band2 ソースの合成数/ソース")
+    p.add_argument("--mult_long", type=int, default=1, help=">band2 ソースの合成数/ソース")
+    p.add_argument("--max_seg", type=int, default=30, help="この秒を超える区間はソースにしない(背景に収まらない)")
     p.add_argument("--margin", type=int, default=2, help="背景GT区間を避けるマージン秒")
     p.add_argument("--max_tries", type=int, default=30, help="挿入位置の試行回数上限")
     p.add_argument("--min_seg", type=int, default=1, help="この秒未満の超短区間は除外")
@@ -95,14 +100,25 @@ def main():
     recs = load_jsonl(args.train_gt)
     print(f"train samples: {len(recs)}")
 
-    # --- ソース: <=thresh 秒の window を持つサンプル(その window) ---
-    sources = []  # (rec, window)
+    # --- ソース: 全帯の window。帯ごとに mult を変える(短を相対的に多く増やし、
+    #     全帯のデータ量も増やすことで前回の複製のような短バイアスを避ける) ---
+    def band_of(L):
+        return "short" if L <= args.band1 else ("mid" if L <= args.band2 else "long")
+    mult_of = {"short": args.mult_short, "mid": args.mult_mid, "long": args.mult_long}
+    sources = []  # (rec, window, mult)
+    nb = {"short": 0, "mid": 0, "long": 0}
     for d in recs:
         for w in d.get("relevant_windows", []):
+            L = w[1] - w[0]
             seglen = int(round(w[1])) - int(round(w[0]))
-            if 0 < (w[1] - w[0]) <= args.thresh and seglen >= args.min_seg:
-                sources.append((d, [int(round(w[0])), int(round(w[1]))]))
-    print(f"short sources (<= {args.thresh}s, seg>={args.min_seg}s): {len(sources)}")
+            if L <= 0 or seglen < args.min_seg or seglen > args.max_seg:
+                continue
+            b = band_of(L)
+            if mult_of[b] > 0:
+                sources.append((d, [int(round(w[0])), int(round(w[1]))], mult_of[b]))
+                nb[b] += 1
+    print(f"sources (seg {args.min_seg}-{args.max_seg}s): "
+          f"short={nb['short']}(x{args.mult_short}) mid={nb['mid']}(x{args.mult_mid}) long={nb['long']}(x{args.mult_long})")
     if args.limit_sources > 0:
         sources = sources[: args.limit_sources]
         print(f"  -> limited to {len(sources)} (smoke)")
@@ -113,22 +129,22 @@ def main():
     new_recs = []
     qid = args.qid_base
     n_made, n_skip = 0, 0
-    for (src, win) in sources:
+    for (src, win, m_src) in sources:
         try:
             src_feat = load_feat(args.a_feat_dir, src["vid"])
         except Exception:
-            n_skip += args.mult
+            n_skip += m_src
             continue
         si, ei = win[0], min(win[1], len(src_feat))
         seg = src_feat[si:ei]
         seglen = len(seg)
         if seglen < args.min_seg:
-            n_skip += args.mult
+            n_skip += m_src
             continue
 
         made_for_src = 0
         tries_bg = 0
-        while made_for_src < args.mult and tries_bg < args.mult * 4:
+        while made_for_src < m_src and tries_bg < m_src * 4:
             tries_bg += 1
             bg = bg_pool[rng.randint(len(bg_pool))]
             if bg["vid"] == src["vid"]:
@@ -177,7 +193,7 @@ def main():
             n_made += 1
             made_for_src += 1
         if made_for_src == 0:
-            n_skip += args.mult
+            n_skip += m_src
 
     print(f"synthesized: {n_made}  (skipped ~{n_skip})")
 
